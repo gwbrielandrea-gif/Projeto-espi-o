@@ -29,6 +29,20 @@ Este código é fornecido apenas para fins educacionais e de demonstração. O u
   - `websockets`
   - `Pillow` (para capturas de tela)
   - `opencv-python` (para webcam)
+  - `paho-mqtt` 
+
+## Configurando e usando ambiente virtual
+ ```bash
+   python3 -m venv venv
+   ```
+
+ ```bash
+   #No Linux:
+   source venv/bin/activate
+
+   #No Windows:
+   .\venv\Scripts\activate
+   ```
 
 ## Instalação
 
@@ -40,7 +54,7 @@ Este código é fornecido apenas para fins educacionais e de demonstração. O u
 
 2. Instale as dependências:
    ```bash
-   pip install websockets Pillow opencv-python
+   pip install websockets Pillow opencv-python paho-mqtt
    ```
 
 ## Uso
